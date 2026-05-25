@@ -1,0 +1,68 @@
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+dir               = .
+certs             = $dir/certs
+crl_dir           = $dir/crl
+database          = $dir/index.txt
+new_certs_dir     = $dir/newcerts
+certificate       = $dir/rootCA.crt
+private_key       = $dir/rootCA.key
+serial            = $dir/serial
+crlnumber         = $dir/crlnumber
+crl               = $dir/crl/rootCA.crl
+default_md        = sha256
+name_opt          = ca_default
+cert_opt          = ca_default
+default_days      = 825
+default_crl_days  = 30
+preserve          = no
+policy            = policy_loose
+copy_extensions   = copy
+unique_subject    = no
+
+[ policy_loose ]
+countryName             = optional
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName              = supplied
+emailAddress            = optional
+
+[ req ]
+default_bits       = 4096
+prompt             = no
+default_md         = sha256
+x509_extensions    = v3_ca
+distinguished_name = dn
+
+[ dn ]
+C  = RU
+ST = Moscow
+L  = Moscow
+O  = Debug HTTPS Logger
+OU = Integration Debug
+CN = Debug Root CA
+
+[ v3_ca ]
+subjectKeyIdentifier    = hash
+authorityKeyIdentifier  = keyid:always,issuer
+basicConstraints        = critical, CA:true
+keyUsage                = critical, digitalSignature, cRLSign, keyCertSign
+crlDistributionPoints   = URI:http://192.168.3.17:8080/crl/rootCA.crl
+
+[ server_cert ]
+basicConstraints        = critical, CA:false
+nsCertType              = server
+subjectKeyIdentifier    = hash
+authorityKeyIdentifier  = keyid,issuer
+keyUsage                = critical, digitalSignature, keyEncipherment
+extendedKeyUsage        = serverAuth
+subjectAltName          = @alt_names
+crlDistributionPoints   = URI:http://192.168.3.17:8080/crl/rootCA.crl
+
+[ alt_names ]
+DNS.1 = debug-server.local
+IP.1 = 192.168.3.17

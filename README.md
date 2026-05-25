@@ -7,6 +7,7 @@
 - Python `3.10+`
 - TLS-сертификат в формате `PEM`
 - приватный ключ в формате `PEM`
+- для Windows-клиентов с обязательной проверкой отзыва нужен опубликованный `CRL`
 
 ## Быстрый запуск
 
@@ -47,6 +48,6 @@ https://<server-host-or-ip>:51401
 
 ## Документация
 
-- Инструкция по выпуску сертификатов на Ubuntu: [ubuntu-certs.md](/D:/PythonProject/tspiot/ubuntu-certs.md)
-- Инструкция по запуску и проверке с Windows: [windows-run-and-test.md](/D:/PythonProject/tspiot/windows-run-and-test.md)
+- Инструкция по выпуску сертификатов на Ubuntu с `CRL`: [ubuntu-certs.md](/D:/PythonProject/tspiot/ubuntu-certs.md)
+- Инструкция по запуску и проверке с Windows при обязательной проверке отзыва: [windows-run-and-test.md](/D:/PythonProject/tspiot/windows-run-and-test.md)
 - Техническое задание: [tz.md](/D:/PythonProject/tspiot/tz.md)

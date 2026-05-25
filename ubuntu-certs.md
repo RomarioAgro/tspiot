@@ -1,91 +1,115 @@
-# Выпуск сертификатов на Ubuntu
+# Выпуск сертификатов на Ubuntu с поддержкой CRL
 
-Инструкция ниже создает:
+Эта инструкция предназначена для сценария, в котором Windows-клиент выполняет обязательную проверку отзыва сертификата через `schannel`.
 
-- корневой сертификат `CA`;
-- приватный ключ `CA`;
-- приватный ключ сервера;
-- `CSR` сервера;
-- серверный сертификат с `SAN` для `DNS` и `IP`.
+Простого корневого `CA` без опубликованного `CRL` для такого сценария недостаточно. Нужна полноценная схема:
 
-Все команды рассчитаны на `Ubuntu` и `OpenSSL`.
+- корневой `CA`;
+- серверный сертификат;
+- `CRL Distribution Point` в сертификатах;
+- опубликованный `CRL`, доступный по HTTP с Windows-клиента.
 
-## 1. Подготовить рабочий каталог
+## 1. Подготовить каталог CA
+
+Из корня проекта:
 
 ```bash
-mkdir -p certs
+mkdir -p certs/{certs,crl,newcerts}
 cd certs
+touch index.txt
+echo 1000 > serial
+echo 1000 > crlnumber
+cp ../openssl-ca.cnf.example openssl-ca.cnf
+cp ../openssl-server.cnf.example server.cnf
 ```
 
-## 2. Создать корневой CA
+## 2. Настроить адреса под ваш стенд
 
-Создать приватный ключ корневого `CA`:
+Открыть `openssl-ca.cnf` и `server.cnf` и заменить:
+
+- `192.168.3.17` на реальный IP Ubuntu-сервера;
+- `debug-server.local` на реальное DNS-имя сервера, если оно используется;
+- при необходимости добавить дополнительные `DNS.N` и `IP.N`.
+
+Критично:
+
+- URL в `crlDistributionPoints` должен быть доступен с Windows-клиента;
+- если клиент ходит по IP, этот IP должен быть в `SAN`;
+- если клиент ходит по DNS, этот DNS должен быть в `SAN`.
+
+Пример URL для `CRL`:
+
+```text
+http://192.168.3.17:8080/crl/rootCA.crl
+```
+
+## 3. Создать корневой CA
+
+Создать приватный ключ:
 
 ```bash
 openssl genrsa -out rootCA.key 4096
 ```
 
-Создать корневой сертификат `CA` сроком на 10 лет:
+Создать корневой сертификат с расширениями `v3_ca`:
 
 ```bash
-openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 3650 -out rootCA.crt \
-  -subj "/C=RU/ST=Moscow/L=Moscow/O=Debug HTTPS Logger/OU=Integration Debug/CN=Debug Root CA"
+openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 3650 -out rootCA.crt -config openssl-ca.cnf -extensions v3_ca
 ```
 
-## 3. Подготовить конфигурацию SAN
+## 4. Создать первый CRL
 
-Скопировать пример конфига:
+Сгенерировать `CRL` сразу после выпуска `CA`:
 
 ```bash
-cp ../openssl-server.cnf.example server.cnf
+openssl ca -config openssl-ca.cnf -gencrl -out crl/rootCA.crl
 ```
 
-Открыть `server.cnf` и заменить значения:
-
-- `CN` на DNS-имя сервера;
-- `DNS.1` на DNS-имя сервера;
-- `IP.1` на IP-адрес сервера.
-
-Если нужно больше имен и адресов, добавить строки вида:
-
-```text
-DNS.2 = debug-server
-IP.2 = 192.168.1.50
-```
-
-## 4. Создать серверный ключ и CSR
-
-Создать приватный ключ сервера:
+## 5. Создать серверный ключ и CSR
 
 ```bash
 openssl genrsa -out server.key 2048
-```
-
-Создать `CSR`:
-
-```bash
 openssl req -new -key server.key -out server.csr -config server.cnf
 ```
 
-## 5. Подписать серверный сертификат корневым CA
+## 6. Подписать серверный сертификат через openssl ca
 
 ```bash
-openssl x509 -req -in server.csr -CA rootCA.crt -CAkey rootCA.key -CAcreateserial \
-  -out server.crt -days 825 -sha256 -extensions req_ext -extfile server.cnf
+openssl ca -batch -config openssl-ca.cnf -extensions server_cert -in server.csr -out server.crt
 ```
 
-## 6. Проверить SAN и цепочку
+## 7. Перегенерировать CRL после выпуска сертификата
 
-Проверить, что в сертификате есть `DNS` и `IP`:
+После любых операций выпуска или отзыва сертификатов обновляйте `CRL`:
 
 ```bash
-openssl x509 -in server.crt -text -noout | grep -A 2 "Subject Alternative Name"
+openssl ca -config openssl-ca.cnf -gencrl -out crl/rootCA.crl
 ```
 
-Проверить, что сертификат подписан вашим `CA`:
+## 8. Проверить сертификат и CRL
+
+Проверить наличие `SAN`:
+
+```bash
+openssl x509 -in server.crt -text -noout | grep -A 4 "Subject Alternative Name"
+```
+
+Проверить наличие `CRL Distribution Points`:
+
+```bash
+openssl x509 -in server.crt -text -noout | grep -A 4 "CRL Distribution Points"
+```
+
+Проверить подпись:
 
 ```bash
 openssl verify -CAfile rootCA.crt server.crt
+```
+
+Проверить локально с использованием `CRL`:
+
+```bash
+openssl verify -crl_check -CAfile rootCA.crt -CRLfile crl/rootCA.crl server.crt
 ```
 
 Ожидаемый результат:
@@ -94,7 +118,30 @@ openssl verify -CAfile rootCA.crt server.crt
 server.crt: OK
 ```
 
-## 7. Запустить Python-сервис
+## 9. Опубликовать CRL по HTTP
+
+Windows должен иметь возможность скачать `CRL` по URL, указанному в сертификате.
+
+Пример публикации:
+
+```bash
+cd certs
+python3 -m http.server 8080
+```
+
+В этом режиме файл `crl/rootCA.crl` будет доступен по адресу:
+
+```text
+http://<SERVER_IP>:8080/crl/rootCA.crl
+```
+
+Важно:
+
+- этот HTTP-сервер должен быть доступен с Windows-клиента;
+- если между клиентом и сервером есть файрвол, нужно открыть `8080/tcp`;
+- при каждом обновлении `CRL` файл на этом URL должен оставаться актуальным.
+
+## 10. Запустить HTTPS-сервис
 
 Из корня проекта:
 
@@ -102,14 +149,23 @@ server.crt: OK
 python3 main.py --host 0.0.0.0 --port 51401 --cert certs/server.crt --key certs/server.key --log-dir logs
 ```
 
-Если на Ubuntu порт закрыт файрволом, открыть его отдельно штатным способом вашей системы.
+## 11. Что передать на Windows-клиент
 
-## 8. Что передать на Windows-клиент
+Нужно передать:
 
-На Windows нужно передать только публичный корневой сертификат:
+- `certs/rootCA.crt`
 
-```text
-certs/rootCA.crt
+Передавать нельзя:
+
+- `certs/rootCA.key`
+
+## 12. Как отзывать сертификат при необходимости
+
+Пример отзыва серверного сертификата:
+
+```bash
+openssl ca -config openssl-ca.cnf -revoke server.crt
+openssl ca -config openssl-ca.cnf -gencrl -out crl/rootCA.crl
 ```
 
-Файл `rootCA.key` передавать на клиент нельзя.
+После этого Windows-клиент при следующей проверке сможет увидеть обновленный статус отзыва через опубликованный `CRL`.
