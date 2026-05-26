@@ -1,0 +1,59 @@
+{
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/v1/codes/check",
+      "status": 200,
+      "headers": {},
+      "body": {
+        "codesResponse": {
+          "codesResponse": [
+            {
+              "code": 0,
+              "description": "ok",
+              "codes": [
+                {
+                  "cis": "0104670540176099215'W9Um93dGVz",
+                  "found": true,
+                  "valid": true,
+                  "printView": "0104670540176099215'W9Um",
+                  "gtin": "04670540176099",
+                  "groupIds": [
+                    8
+                  ],
+                  "verified": true,
+                  "realizable": false,
+                  "utilised": false,
+                  "isBlocked": false,
+                  "ogvs": [],
+                  "errorCode": 0,
+                  "isTracking": false,
+                  "sold": false,
+                  "grayZone": false,
+                  "packageType": "UNIT",
+                  "producerInn": "7725344604"
+                }
+              ],
+              "reqId": "07a0f44a-fe65-4cf1-a036-0462aeea531f",
+              "reqTimestamp": 1755002475660,
+              "isCheckedOffline": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/info",
+      "status": 200,
+      "headers": {},
+      "body": {
+        "tspiotId": "00106322849758",
+        "kktSerial": "00106322849258",
+        "fnSerial": "9999078902016936",
+        "kktInn": "9717169621",
+        "codesCheckTimeout": "1800"
+      }
+    }
+  ]
+}

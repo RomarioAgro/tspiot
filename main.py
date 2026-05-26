@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 51401
 DEFAULT_LOG_DIR = "logs"
+DEFAULT_RESPONSES_FILE = "responses.json"
 
 
 def utc_now() -> datetime:
@@ -144,8 +145,34 @@ def decode_body(body: bytes, content_type: str | None) -> dict:
     return result
 
 
+class ResponseRegistry:
+    def __init__(self, path: Path):
+        self.path = path
+        self.routes = self._load(path)
+
+    @staticmethod
+    def _load(path: Path) -> dict[tuple[str, str], dict]:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        routes: dict[tuple[str, str], dict] = {}
+        for route in payload.get("routes", []):
+            method = route["method"].upper()
+            route_path = route["path"]
+            routes[(method, route_path)] = route
+        return routes
+
+    def get(self, method: str, path: str) -> dict | None:
+        return self.routes.get((method.upper(), path))
+
+
+def render_response_body(route: dict) -> tuple[bytes, str]:
+    body = route.get("body", {})
+    body_bytes = json.dumps(body, ensure_ascii=False, indent=2).encode("utf-8")
+    return body_bytes, "application/json; charset=utf-8"
+
+
 def render_txt_log(record: dict) -> str:
     body = record["body"]
+    response = record["response"]
     lines = [
         "Request Log",
         f"request_id: {record['request_id']}",
@@ -182,6 +209,23 @@ def render_txt_log(record: dict) -> str:
             "Parsed Body:",
             json.dumps(body["parsed"], ensure_ascii=False, indent=2) if body["parsed"] is not None else "<none>",
             "",
+            "Response Summary:",
+            f"status: {response['status']}",
+            f"matched_route: {response['matched_route']}",
+            "",
+            "Response Headers:",
+        ]
+    )
+
+    for key, value in response["headers"].items():
+        lines.append(f"{key}: {value}")
+
+    lines.extend(
+        [
+            "",
+            "Response Body:",
+            response["body_text"],
+            "",
         ]
     )
     return "\n".join(lines)
@@ -209,10 +253,18 @@ class RequestLogger:
 class DebugHTTPServer(HTTPServer):
     allow_reuse_address = True
 
-    def __init__(self, server_address, handler_class, ssl_context: ssl.SSLContext, log_dir: Path):
+    def __init__(
+        self,
+        server_address,
+        handler_class,
+        ssl_context: ssl.SSLContext,
+        log_dir: Path,
+        response_registry: ResponseRegistry,
+    ):
         super().__init__(server_address, handler_class)
         self.ssl_context = ssl_context
         self.request_logger = RequestLogger(log_dir)
+        self.response_registry = response_registry
 
     def get_request(self):
         socket, addr = TCPServer.get_request(self)
@@ -221,7 +273,7 @@ class DebugHTTPServer(HTTPServer):
 
 
 class DebugRequestHandler(BaseHTTPRequestHandler):
-    server_version = "DebugHTTPSLogger/1.0"
+    server_version = "DebugHTTPSLogger/1.1"
     sys_version = ""
 
     def handle_one_request(self) -> None:
@@ -276,6 +328,8 @@ class DebugRequestHandler(BaseHTTPRequestHandler):
         parsed_url = urlsplit(self.path)
         content_type = self.headers.get("Content-Type")
         request_id = uuid.uuid4().hex[:8]
+        route = self.server.response_registry.get(self.command, parsed_url.path)
+        response_payload = self.build_response_payload(route)
 
         record = {
             "request_id": request_id,
@@ -292,6 +346,7 @@ class DebugRequestHandler(BaseHTTPRequestHandler):
             "content_type": content_type,
             "content_length": len(body),
             "body": decode_body(body, content_type),
+            "response": response_payload["log"],
         }
 
         txt_path, json_path = self.server.request_logger.write(record)
@@ -303,7 +358,35 @@ class DebugRequestHandler(BaseHTTPRequestHandler):
             txt_path.name,
             json_path.name,
         )
-        self.respond_ok()
+        self.respond(response_payload["status"], response_payload["headers"], response_payload["body_bytes"])
+
+    def build_response_payload(self, route: dict | None) -> dict:
+        if route is None:
+            route = {
+                "method": self.command,
+                "path": urlsplit(self.path).path,
+                "status": 200,
+                "headers": {},
+                "body": {"status": "ok"},
+            }
+
+        body_bytes, default_content_type = render_response_body(route)
+        headers = dict(route.get("headers", {}))
+        headers.setdefault("Content-Type", default_content_type)
+        headers["Content-Length"] = str(len(body_bytes))
+
+        return {
+            "status": int(route.get("status", 200)),
+            "headers": headers,
+            "body_bytes": body_bytes,
+            "log": {
+                "status": int(route.get("status", 200)),
+                "matched_route": f"{route['method'].upper()} {route['path']}",
+                "headers": headers,
+                "body_text": body_bytes.decode("utf-8"),
+                "body_json": route.get("body"),
+            },
+        }
 
     def read_request_body(self) -> bytes:
         transfer_encoding = self.headers.get("Transfer-Encoding", "").lower()
@@ -333,19 +416,17 @@ class DebugRequestHandler(BaseHTTPRequestHandler):
                     trailer_line = self.rfile.readline()
                     if trailer_line in (b"\r\n", b"\n", b""):
                         return bytes(chunks)
-                break
             chunks.extend(self.rfile.read(chunk_size))
             self.rfile.read(2)
         return bytes(chunks)
 
-    def respond_ok(self) -> None:
-        response_body = json.dumps({"status": "ok"}, ensure_ascii=False).encode("utf-8")
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(response_body)))
+    def respond(self, status: int, headers: dict[str, str], body: bytes) -> None:
+        self.send_response(status)
+        for key, value in headers.items():
+            self.send_header(key, value)
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(response_body)
+            self.wfile.write(body)
 
     def log_message(self, format_string: str, *args) -> None:
         message = "%s - - [%s] %s\n" % (
@@ -373,6 +454,11 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_LOG_DIR,
         help=f"Directory where per-request TXT and JSON logs are stored. Default: {DEFAULT_LOG_DIR}",
     )
+    parser.add_argument(
+        "--responses",
+        default=DEFAULT_RESPONSES_FILE,
+        help=f"Path to response mapping JSON. Default: {DEFAULT_RESPONSES_FILE}",
+    )
     return parser.parse_args()
 
 
@@ -381,19 +467,24 @@ def main() -> None:
     cert_path = Path(args.cert).expanduser().resolve()
     key_path = Path(args.key).expanduser().resolve()
     log_dir = Path(args.log_dir).expanduser().resolve()
+    responses_path = Path(args.responses).expanduser().resolve()
 
     if not cert_path.is_file():
         raise FileNotFoundError(f"Certificate file not found: {cert_path}")
     if not key_path.is_file():
         raise FileNotFoundError(f"Private key file not found: {key_path}")
+    if not responses_path.is_file():
+        raise FileNotFoundError(f"Responses file not found: {responses_path}")
 
     ssl_context = build_ssl_context(cert_path, key_path)
-    server = DebugHTTPServer((args.host, args.port), DebugRequestHandler, ssl_context, log_dir)
+    response_registry = ResponseRegistry(responses_path)
+    server = DebugHTTPServer((args.host, args.port), DebugRequestHandler, ssl_context, log_dir, response_registry)
 
     print(f"Listening on https://{args.host}:{args.port}")
     print(f"Certificate: {cert_path}")
     print(f"Private key: {key_path}")
     print(f"Log directory: {log_dir}")
+    print(f"Responses config: {responses_path}")
 
     try:
         server.serve_forever()
