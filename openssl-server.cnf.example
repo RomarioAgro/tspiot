@@ -17,5 +17,5 @@ CN = debug-server.local
 subjectAltName = @alt_names
 
 [ alt_names ]
-DNS.1 = debug-server.local
+DNS.1 = roman-B250M-Gaming-3
 IP.1 = 192.168.3.17

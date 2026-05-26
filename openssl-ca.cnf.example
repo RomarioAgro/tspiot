@@ -64,5 +64,5 @@ subjectAltName          = @alt_names
 crlDistributionPoints   = URI:http://192.168.3.17:8080/crl/rootCA.crl
 
 [ alt_names ]
-DNS.1 = debug-server.local
+DNS.1 = roman-B250M-Gaming-3
 IP.1 = 192.168.3.17
