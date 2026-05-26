@@ -1,0 +1,24 @@
+[server]
+# mode can be http or https. One process listens in one mode only.
+mode = http
+host = 0.0.0.0
+# Defaults are 51400 for http and 51401 for https if port is omitted.
+port = 51400
+
+[target]
+# Target TLS certificates are not verified by this debug proxy.
+scheme = http
+host = 127.0.0.1
+port = 8080
+
+[timeouts]
+connect_timeout = 10
+read_timeout = 60
+
+[logging]
+dir = proxy_logs
+
+[tls]
+# Required only when server.mode = https.
+cert_file = certs/server.crt
+key_file = certs/server.key

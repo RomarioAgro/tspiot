@@ -73,4 +73,6 @@ https://<server-host-or-ip>:51401
 
 - Инструкция по выпуску сертификатов на Ubuntu с `CRL`: [ubuntu-certs.md](/D:/PythonProject/tspiot/ubuntu-certs.md)
 - Инструкция по запуску и проверке с Windows при обязательной проверке отзыва: [windows-run-and-test.md](/D:/PythonProject/tspiot/windows-run-and-test.md)
+- Инструкция по debug proxy: [proxy.md](/D:/PythonProject/tspiot/proxy.md)
 - Техническое задание: [tz.md](/D:/PythonProject/tspiot/tz.md)
+- Техническое задание по debug proxy: [tz_proxy.md](/D:/PythonProject/tspiot/tz_proxy.md)
